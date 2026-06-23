@@ -1,45 +1,56 @@
 use android_activity::{AndroidApp, input::{InputEvent, MotionAction}, InputStatus};
-use glow::HasContext;
-use fontdue::Font;
-use std::ffi::CString;
 
-pub fn render(gl: &glow::Context, app: &AndroidApp, width: i32, height: i32) -> bool {
-    unsafe {
-        gl.clear_color(0.1, 0.15, 0.3, 1.0);
-        gl.clear(glow::COLOR_BUFFER_BIT);
+pub fn update_and_draw(
+    pixels: &mut [u8], 
+    app: &AndroidApp, 
+    width: usize, 
+    height: usize, 
+    stride: usize
+) -> bool {
+    // 1. Очистка экрана (Заливаем темно-синим)
+    for y in 0..height {
+        for x in 0..width {
+            let idx = (y * stride + x) * 4;
+            pixels[idx] = 25;     // R
+            pixels[idx + 1] = 30; // G
+            pixels[idx + 2] = 80; // B
+            pixels[idx + 3] = 255; // A
+        }
     }
 
-    static mut FONT: Option<Font> = None;
-    unsafe {
-        if FONT.is_none() {
-            if let Ok(filename) = CString::new("Font.ttf") {
-                if let Some(mut asset) = app.asset_manager().open(&filename) {
-                    // ТУТ БЫЛА ОШИБКА: buffer() возвращает Result, используем Ok()
-                    if let Ok(buffer) = asset.buffer() {
-                        FONT = Font::from_bytes(buffer.to_vec(), fontdue::FontSettings::default()).ok();
-                    }
-                }
+    // 2. Рисуем "Кнопку" (Просто белый прямоугольник в центре)
+    let bx = width / 2 - 150;
+    let by = height / 2 - 50;
+    let bw = 300;
+    let bh = 100;
+
+    for y in by..(by + bh) {
+        for x in bx..(bx + bw) {
+            if x < width && y < height {
+                let idx = (y * stride + x) * 4;
+                pixels[idx] = 200;
+                pixels[idx + 1] = 200;
+                pixels[idx + 2] = 255;
             }
         }
     }
 
+    // 3. Обработка ввода
     let mut go_settings = false;
-    let (bw, bh) = (width as f32 * 0.4, height as f32 * 0.15);
-    let (bx, by) = ((width as f32 - bw) / 2.0, (height as f32 - bh) / 2.0);
-
     if let Ok(mut iter) = app.input_events_iter() {
         while iter.next(|ev| {
             if let InputEvent::MotionEvent(m) = ev {
                 if m.action() == MotionAction::Down {
-                    let x = m.pointer_at_index(0).x();
-                    let y = m.pointer_at_index(0).y();
-                    if x > bx && x < bx + bw && y > by && y < by + bh { 
-                        go_settings = true; 
+                    let x = m.pointer_at_index(0).x() as usize;
+                    let y = m.pointer_at_index(0).y() as usize;
+                    if x > bx && x < bx + bw && y > by && y < by + bh {
+                        go_settings = true;
                     }
                 }
             }
             InputStatus::Handled
         }) {}
     }
+
     go_settings
 }
