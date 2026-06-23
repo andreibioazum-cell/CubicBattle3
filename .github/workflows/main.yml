@@ -1,92 +1,67 @@
 name: Migrate to C
 on: 
-  workflow_dispatch: # Запускать вручную в разделе Actions
+  workflow_dispatch: # Позволяет запустить вручную
 
 permissions:
-  contents: write # Даем права на запись в репозиторий
+  contents: write
 
 jobs:
-  burn_rust_build_c:
+  cleanup_and_convert:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Нужно для корректного пуша
 
-      - name: Delete Rust stuff
+      - name: Purge Rust and Create C
         run: |
-          # Удаляем старые файлы Rust
+          # 1. Удаляем всё старое
           rm -rf src
           rm -f Cargo.toml
           rm -f Cargo.lock
-          # Создаем новую структуру папок
+          
+          # 2. Создаем структуру
           mkdir -p jni
           mkdir -p .github/workflows
 
-      - name: Create CMakeLists.txt
-        run: |
+          # 3. Создаем CMakeLists.txt
           cat <<'EOF' > CMakeLists.txt
           cmake_minimum_required(VERSION 3.10.2)
           project(cubicbattle)
-
-          # native_app_glue - это стандарт для C на Android
-          add_library(native_app_glue STATIC
-              ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
-
+          add_library(native_app_glue STATIC ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
           add_library(cubicbattle SHARED jni/main.c)
-
-          target_include_directories(cubicbattle PRIVATE
-              ${ANDROID_NDK}/sources/android/native_app_glue)
-
+          target_include_directories(cubicbattle PRIVATE ${ANDROID_NDK}/sources/android/native_app_glue)
           find_library(log-lib log)
           find_library(android-lib android)
           find_library(egl-lib EGL)
           find_library(gles-lib GLESv3)
-
-          target_link_libraries(cubicbattle 
-              native_app_glue
-              ${log-lib} 
-              ${android-lib} 
-              ${egl-lib} 
-              ${gles-lib})
+          target_link_libraries(cubicbattle native_app_glue ${log-lib} ${android-lib} ${egl-lib} ${gles-lib})
           EOF
 
-      - name: Create main.c
-        run: |
+          # 4. Создаем main.c
           cat <<'EOF' > jni/main.c
           #include <EGL/egl.h>
           #include <GLES3/gl3.h>
           #include <android/log.h>
           #include <android_native_app_glue.h>
-          #include <stdlib.h>
-
-          #define LOG_TAG "CubicBattle_C"
-          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
           void android_main(struct android_app* state) {
-              LOGI("C version started! Rust has been purged! 🦭🔥");
-              
+              __android_log_print(ANDROID_LOG_INFO, "CubicBattle", "C version active!");
               while (1) {
                   int ident, events;
                   struct android_poll_source* source;
-                  
                   while ((ident = ALooper_pollAll(0, NULL, &events, (void**)&source)) >= 0) {
                       if (source != NULL) source->process(state, source);
                       if (state->destroyRequested != 0) return;
                   }
-
-                  // Рендер (просто очистка экрана в красный для теста)
-                  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+                  glClearColor(0.0f, 0.5f, 1.0f, 1.0f); // Голубой экран (не смерти!)
                   glClear(GL_COLOR_BUFFER_BIT);
               }
           }
           EOF
 
-      - name: Create NEW CI (build-c.yml)
-        run: |
-          cat <<'EOF' > .github/workflows/build-c.yml
-          name: Build C APK
+          # 5. Создаем новый CI для C
+          cat <<'EOF' > .github/workflows/build.yml
+          name: Build C
           on: [push]
           jobs:
             build:
@@ -97,19 +72,16 @@ jobs:
                   uses: nttld/setup-ndk@v1
                   with:
                     ndk-version: r25c
-                - name: Build with CMake
+                - name: Build
                   run: |
-                    cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-                          -DANDROID_ABI=arm64-v8a \
-                          -DANDROID_PLATFORM=android-24 \
-                          .
+                    cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 .
                     make
           EOF
 
-      - name: Commit and Push changes
+      - name: Git Push
         run: |
           git config --global user.name "C-Migrator"
           git config --global user.email "migrator@example.com"
           git add .
-          git commit -m "Migration to C Complete: Pure C version initialized 🦭🚀"
-          git push origin main # Если у тебя ветка называется master, замени main на master
+          git commit -m "Purged Rust, switched to C 🦭🧨"
+          git push origin HEAD
