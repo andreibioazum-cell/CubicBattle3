@@ -1,45 +1,55 @@
-use android_activity::{AndroidApp, input::{InputEvent, MotionAction}};
+use android_activity::{
+    AndroidApp,
+    input::{InputEvent, MotionAction},
+    InputStatus,
+};
 use glow::HasContext;
 use fontdue::Font;
-
-static mut INIT: bool = false;
-static mut FONT: Option<Font> = None;
+use std::ffi::CString;
 
 pub fn render(gl: &glow::Context, app: &AndroidApp) -> bool {
     unsafe {
-        if !INIT {
-            let font_bytes = app.asset_manager()
-                .open("Font.ttf")
-                .unwrap()
-                .buffer()
-                .unwrap()
-                .to_vec();
-
-            FONT = Some(Font::from_bytes(font_bytes, fontdue::FontSettings::default()).unwrap());
-            INIT = true;
-        }
-
         gl.viewport(0, 0, 1280, 720);
         gl.clear_color(0.1, 0.1, 0.3, 1.0);
         gl.clear(glow::COLOR_BUFFER_BIT);
+    }
 
-        // простая кнопка Settings зона
-        if let Ok(mut iter) = app.input_events_iter() {
-            while iter.next(|e| {
-                if let InputEvent::MotionEvent(m) = e {
-                    if m.action() == MotionAction::Down {
-                        let x = m.pointer_at_index(0).x();
-                        let y = m.pointer_at_index(0).y();
+    // ===== Загрузка шрифта (один раз через lazy static) =====
+    static mut FONT: Option<Font> = None;
 
-                        if x > 500.0 && x < 780.0 && y > 300.0 && y < 380.0 {
-                            return true;
-                        }
+    unsafe {
+        if FONT.is_none() {
+            let filename = CString::new("Font.ttf").unwrap();
+            let asset = app.asset_manager().open(&filename).unwrap();
+            let buffer = asset.buffer().unwrap().to_vec();
+
+            FONT = Some(
+                Font::from_bytes(buffer, fontdue::FontSettings::default()).unwrap()
+            );
+        }
+    }
+
+    // ===== Проверка нажатия кнопки Settings =====
+
+    let mut go_settings = false;
+
+    if let Ok(mut iter) = app.input_events_iter() {
+        while iter.next(|event| {
+            if let InputEvent::MotionEvent(motion) = event {
+                if motion.action() == MotionAction::Down {
+                    let x = motion.pointer_at_index(0).x();
+                    let y = motion.pointer_at_index(0).y();
+
+                    // Кнопка по центру
+                    if x > 500.0 && x < 780.0 && y > 300.0 && y < 380.0 {
+                        go_settings = true;
                     }
                 }
-                android_activity::InputStatus::Handled
-            }) {}
-        }
+            }
 
-        false
+            InputStatus::Handled
+        }) {}
     }
+
+    go_settings
 }
