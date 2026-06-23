@@ -38,15 +38,22 @@ pub fn android_main(app: AndroidApp) {
                     let win = app.native_window().unwrap();
                     display = eglGetDisplay(ptr::null_mut());
                     eglInitialize(display, ptr::null_mut(), ptr::null_mut());
+                    
+                    let cfg_attr = [0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3033, 4, 0x3038];
                     let mut config = ptr::null_mut();
                     let mut n = 0;
-                    eglChooseConfig(display, [0x3024,8,0x3023,8,0x3022,8,0x3033,4,0x3038].as_ptr(), &mut config, 1, &mut n);
+                    eglChooseConfig(display, cfg_attr.as_ptr(), &mut config, 1, &mut n);
+                    
                     surface = eglCreateWindowSurface(display, config, win.ptr().as_ptr() as *mut _, ptr::null());
-                    let ctx = eglCreateContext(display, config, ptr::null_mut(), [0x3098, 3, 0x3038].as_ptr());
+                    
+                    let ctx_attr = [0x3098, 3, 0x3038];
+                    let ctx = eglCreateContext(display, config, ptr::null_mut(), ctx_attr.as_ptr());
+                    
                     eglMakeCurrent(display, surface, surface, ctx);
                     eglSwapInterval(display, 1);
                     eglQuerySurface(display, surface, 0x3057, &mut width);
                     eglQuerySurface(display, surface, 0x3056, &mut height);
+                    
                     gl = Some(glow::Context::from_loader_function(|s| eglGetProcAddress(CString::new(s).unwrap().as_ptr())));
                 }
             }
