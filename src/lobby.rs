@@ -14,7 +14,8 @@ pub fn render(gl: &glow::Context, app: &AndroidApp, width: i32, height: i32) -> 
         if FONT.is_none() {
             if let Ok(filename) = CString::new("Font.ttf") {
                 if let Some(mut asset) = app.asset_manager().open(&filename) {
-                    if let Some(buffer) = asset.buffer() {
+                    // ТУТ БЫЛА ОШИБКА: buffer() возвращает Result, используем Ok()
+                    if let Ok(buffer) = asset.buffer() {
                         FONT = Font::from_bytes(buffer.to_vec(), fontdue::FontSettings::default()).ok();
                     }
                 }
