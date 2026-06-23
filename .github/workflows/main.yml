@@ -1,87 +1,35 @@
-name: Migrate to C
-on: 
-  workflow_dispatch: # Позволяет запустить вручную
-
-permissions:
-  contents: write
+name: Build Rust Software Renderer
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  cleanup_and_convert:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Purge Rust and Create C
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c # Стабильная версия для Rust
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build Library
         run: |
-          # 1. Удаляем всё старое
-          rm -rf src
-          rm -f Cargo.toml
-          rm -f Cargo.lock
-          
-          # 2. Создаем структуру
-          mkdir -p jni
-          mkdir -p .github/workflows
+          cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release
 
-          # 3. Создаем CMakeLists.txt
-          cat <<'EOF' > CMakeLists.txt
-          cmake_minimum_required(VERSION 3.10.2)
-          project(cubicbattle)
-          add_library(native_app_glue STATIC ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
-          add_library(cubicbattle SHARED jni/main.c)
-          target_include_directories(cubicbattle PRIVATE ${ANDROID_NDK}/sources/android/native_app_glue)
-          find_library(log-lib log)
-          find_library(android-lib android)
-          find_library(egl-lib EGL)
-          find_library(gles-lib GLESv3)
-          target_link_libraries(cubicbattle native_app_glue ${log-lib} ${android-lib} ${egl-lib} ${gles-lib})
-          EOF
-
-          # 4. Создаем main.c
-          cat <<'EOF' > jni/main.c
-          #include <EGL/egl.h>
-          #include <GLES3/gl3.h>
-          #include <android/log.h>
-          #include <android_native_app_glue.h>
-
-          void android_main(struct android_app* state) {
-              __android_log_print(ANDROID_LOG_INFO, "CubicBattle", "C version active!");
-              while (1) {
-                  int ident, events;
-                  struct android_poll_source* source;
-                  while ((ident = ALooper_pollAll(0, NULL, &events, (void**)&source)) >= 0) {
-                      if (source != NULL) source->process(state, source);
-                      if (state->destroyRequested != 0) return;
-                  }
-                  glClearColor(0.0f, 0.5f, 1.0f, 1.0f); // Голубой экран (не смерти!)
-                  glClear(GL_COLOR_BUFFER_BIT);
-              }
-          }
-          EOF
-
-          # 5. Создаем новый CI для C
-          cat <<'EOF' > .github/workflows/build.yml
-          name: Build C
-          on: [push]
-          jobs:
-            build:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - name: Set up NDK
-                  uses: nttld/setup-ndk@v1
-                  with:
-                    ndk-version: r25c
-                - name: Build
-                  run: |
-                    cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 .
-                    make
-          EOF
-
-      - name: Git Push
-        run: |
-          git config --global user.name "C-Migrator"
-          git config --global user.email "migrator@example.com"
-          git add .
-          git commit -m "Purged Rust, switched to C 🦭🧨"
-          git push origin HEAD
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cubicbattle-lib
+          path: target/aarch64-linux-android/release/libcubicbattle.so
