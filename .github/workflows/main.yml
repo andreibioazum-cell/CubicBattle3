@@ -21,16 +21,19 @@ jobs:
         with:
           ndk-version: r25c
 
+      # 👇 ЭТОТ ШАГ РЕШАЕТ ПРОБЛЕМУ С ПЛАТФОРМОЙ 30
+      - name: Install Android SDK Platform
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME "platforms;android-30" "platforms;android-34"
+
       - name: Install cargo-apk
         run: cargo install cargo-apk
 
       - name: Build APK
-        # Собираем в режиме release для скорости
         run: cargo apk build --release
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CubicBattle-Release-APK
-          # Путь, куда cargo-apk кладет готовый файл
           path: target/release/apk/cubicbattle.apk
