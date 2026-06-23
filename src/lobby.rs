@@ -4,38 +4,32 @@ use android_activity::{
     InputStatus,
 };
 use glow::HasContext;
-use fontdue::Font;
-use std::ffi::CString;
 
-pub fn render(gl: &glow::Context, app: &AndroidApp) -> bool {
+/// Lobby сцена
+/// Возвращает true если нужно перейти в Settings
+pub fn render(
+    gl: &glow::Context,
+    app: &AndroidApp,
+    width: i32,
+    height: i32,
+) -> bool {
     unsafe {
-        gl.viewport(0, 0, 1280, 720);
-        gl.clear_color(0.1, 0.1, 0.3, 1.0);
+        // Фон
+        gl.clear_color(0.1, 0.15, 0.35, 1.0);
         gl.clear(glow::COLOR_BUFFER_BIT);
     }
 
-    // ===== Загрузка шрифта (один раз через static mut) =====
-    static mut FONT: Option<Font> = None;
+    // ===== КНОПКА SETTINGS =====
+    // Кнопка по центру экрана
+    let button_width = width as f32 * 0.3;
+    let button_height = height as f32 * 0.12;
 
-    unsafe {
-        if FONT.is_none() {
-            let filename = CString::new("Font.ttf").unwrap();
-            
-            // 👇 ДОБАВИЛ `mut` СЮДА
-            let mut asset = app.asset_manager().open(&filename).unwrap();
-            
-            let buffer = asset.buffer().unwrap().to_vec();
-
-            FONT = Some(
-                Font::from_bytes(buffer, fontdue::FontSettings::default()).unwrap()
-            );
-        }
-    }
-
-    // ===== Проверка нажатия кнопки Settings =====
+    let button_x = (width as f32 - button_width) * 0.5;
+    let button_y = (height as f32 - button_height) * 0.5;
 
     let mut go_settings = false;
 
+    // ===== INPUT =====
     if let Ok(mut iter) = app.input_events_iter() {
         while iter.next(|event| {
             if let InputEvent::MotionEvent(motion) = event {
@@ -43,8 +37,11 @@ pub fn render(gl: &glow::Context, app: &AndroidApp) -> bool {
                     let x = motion.pointer_at_index(0).x();
                     let y = motion.pointer_at_index(0).y();
 
-                    // Кнопка по центру (зона 500-780 x, 300-380 y)
-                    if x > 500.0 && x < 780.0 && y > 300.0 && y < 380.0 {
+                    if x > button_x
+                        && x < button_x + button_width
+                        && y > button_y
+                        && y < button_y + button_height
+                    {
                         go_settings = true;
                     }
                 }
