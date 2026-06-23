@@ -91,7 +91,7 @@ unsafe fn init_egl(native_window: *mut c_void) -> Option<GlContext> {
 
     let gl = glow::Context::from_loader_function(|sym| {
         let c_str = CString::new(sym).unwrap();
-        eglGetProcAddress(c_str.as_ptr())
+        eglGetProcAddress(c_str.as_ptr() as *const std::os::raw::c_char)
     });
 
     Some(GlContext { display, surface, gl })
@@ -188,23 +188,27 @@ pub fn android_main(app: AndroidApp) {
             _ => {}
         });
 
-        // Обработка ввода через замыкание (android-activity 0.5)
-        app.input_events_iter(|input| {
-            if let Some(motion) = input.as_motion_event() {
-                if motion.get_action() == 0 { // ACTION_DOWN
-                    let x = motion.get_x(0);
-                    let y = motion.get_y(0);
-                    unsafe {
-                        if CURRENT_STATE == GameState::Lobby {
-                            let btn = LOBBY_BTN;
-                            if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
-                                CURRENT_STATE = GameState::Game;
+        // ИСПРАВЛЕННЫЙ ВВОД для android-activity 0.5.2
+        if let Ok(iter) = app.input_events_iter() {
+            for input in iter {
+                if let android_activity::input::InputEvent::MotionEvent(motion) = input {
+                    if motion.action() == android_activity::input::MotionAction::Down {
+                        let pointer = motion.pointer_at_index(0);
+                        let x = pointer.x();
+                        let y = pointer.y();
+                        unsafe {
+                            if CURRENT_STATE == GameState::Lobby {
+                                let btn = LOBBY_BTN;
+                                if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
+                                    info!("PLAY pressed!");
+                                    CURRENT_STATE = GameState::Game;
+                                }
                             }
                         }
                     }
                 }
             }
-        });
+        }
 
         if let (Some(ref ctx), Some(ref r)) = (&gl_ctx, &rs) {
             unsafe {
@@ -220,4 +224,4 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
-    }
+}
