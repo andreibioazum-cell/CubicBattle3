@@ -1,230 +1,225 @@
-use android_activity::{AndroidApp, MainEvent, PollEvent, InputStatus};
-use glam::{vec4, Vec4, Vec2};
+use android_activity::{AndroidApp, MainEvent, PollEvent};
 use glow::HasContext;
+use glam::vec4;
 use std::ffi::{c_void, CString};
 use std::ptr;
+use std::time::Instant;
+use fontdue::Font;
 
-// ========== EGL BINDINGS ==========
+// ================= EGL =================
+
 #[link(name = "EGL")]
 extern "C" {
     fn eglGetDisplay(id: *mut c_void) -> *mut c_void;
     fn eglInitialize(d: *mut c_void, ma: *mut i32, mi: *mut i32) -> i32;
     fn eglChooseConfig(d: *mut c_void, al: *const i32, c: *mut *mut c_void, cs: i32, nc: *mut i32) -> i32;
-    fn eglGetConfigAttrib(d: *mut c_void, c: *mut c_void, a: i32, v: *mut i32) -> i32;
     fn eglCreateWindowSurface(d: *mut c_void, c: *mut c_void, w: *mut c_void, al: *const i32) -> *mut c_void;
     fn eglCreateContext(d: *mut c_void, c: *mut c_void, sc: *mut c_void, al: *const i32) -> *mut c_void;
     fn eglMakeCurrent(d: *mut c_void, dr: *mut c_void, r: *mut c_void, ctx: *mut c_void) -> i32;
     fn eglQuerySurface(d: *mut c_void, s: *mut c_void, a: i32, v: *mut i32) -> i32;
     fn eglSwapBuffers(d: *mut c_void, s: *mut c_void) -> i32;
+    fn eglSwapInterval(d: *mut c_void, interval: i32) -> i32;
     fn eglGetProcAddress(n: *const std::os::raw::c_char) -> *mut c_void;
 }
-#[link(name = "android")]
-extern "C" { fn ANativeWindow_setBuffersGeometry(w: *mut c_void, wi: i32, h: i32, f: i32); }
 
-// ========== GAME OBJECTS ==========
-#[derive(Clone, Copy, PartialEq)]
-enum GameState { Lobby, Game }
-static mut STATE: GameState = GameState::Lobby;
+// ================= SHADERS =================
 
-struct Star { x: f32, y: f32, speed: f32, alpha: f32, size: f32 }
-static mut STARS: Vec<Star> = Vec::new();
-static mut SW: f32 = 0.0;
-static mut SH: f32 = 0.0;
-
-#[derive(Clone, Copy)]
-struct Button { x: f32, y: f32, w: f32, h: f32 }
-static mut BTN_PLAY: Button = Button { x: 0.0, y: 0.0, w: 220.0, h: 75.0 };
-
-unsafe fn get_scale() -> f32 { (if SW < SH { SW } else { SH }) / 600.0 }
-
-// ========== SHADERS ==========
 const VS: &str = r#"
-    attribute vec2 a_pos;
-    varying vec2 v_uv;
-    void main() {
-        v_uv = a_pos;
-        gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
-    }
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() {
+    v_uv = a_pos;
+    gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
+}
 "#;
 
 const FS: &str = r#"
-    precision mediump float;
-    varying vec2 v_uv;
-    uniform int u_mode; // 0: Grad, 1: SDF Rect
-    uniform vec2 u_res;
-    uniform vec4 u_c1, u_c2, u_c3, u_c4;
-    uniform vec4 u_rect; // x, y, w, h
-    uniform float u_radius;
-    uniform vec4 u_color;
+precision mediump float;
+varying vec2 v_uv;
 
-    float sdf_rect(vec2 p, vec2 b, float r) {
-        vec2 d = abs(p - b * 0.5) - b * 0.5 + r;
-        return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
-    }
+uniform sampler2D u_tex;
+uniform vec4 u_color;
 
-    void main() {
-        if (u_mode == 0) {
-            vec4 top = mix(u_c1, u_c2, v_uv.x);
-            vec4 bot = mix(u_c4, u_c3, v_uv.x);
-            gl_FragColor = mix(bot, top, v_uv.y);
-        } else {
-            vec2 px = vec2(v_uv.x, 1.0 - v_uv.y) * u_res;
-            float d = sdf_rect(px - u_rect.xy, u_rect.zw, u_radius);
-            float alpha = smoothstep(1.0, 0.0, d);
-            if (alpha <= 0.0) discard;
-            gl_FragColor = vec4(u_color.rgb, u_color.a * alpha);
-        }
-    }
+void main() {
+    float alpha = texture2D(u_tex, v_uv).r;
+    gl_FragColor = vec4(u_color.rgb, alpha * u_color.a);
+}
 "#;
 
-struct Render { gl: glow::Context, prog: glow::Program }
+// ================= TEXT RENDERER =================
 
-unsafe fn draw_rounded_rect(r: &Render, x: f32, y: f32, w: f32, h: f32, rad: f32, color: Vec4) {
-    let gl = &r.gl;
-    gl.uniform_1_i32(gl.get_uniform_location(r.prog, "u_mode").as_ref(), 1);
-    gl.uniform_4_f32(gl.get_uniform_location(r.prog, "u_rect").as_ref(), x, y, w, h);
-    gl.uniform_1_f32(gl.get_uniform_location(r.prog, "u_radius").as_ref(), rad);
-    gl.uniform_4_f32(gl.get_uniform_location(r.prog, "u_color").as_ref(), color.x, color.y, color.z, color.w);
-    gl.draw_arrays(glow::TRIANGLES, 0, 6);
+struct TextRenderer {
+    texture: glow::Texture,
+    width: i32,
+    height: i32,
 }
 
-// ========== ВЕКТОРНЫЙ ТЕКСТ (не пиксельный) ==========
-unsafe fn draw_text(r: &Render, text: &str, x: f32, y: f32, size: f32, color: Vec4) {
-    let sc = size / 10.0;
-    let mut curr_x = x;
+unsafe fn create_text_texture(
+    gl: &glow::Context,
+    font: &Font,
+    text: &str,
+    size: f32,
+) -> TextRenderer {
+    let mut total_width = 0;
+    let mut max_height = 0;
+    let mut glyphs = Vec::new();
+
     for c in text.chars() {
-        if c == ' ' { curr_x += 15.0 * sc; continue; }
-        // Рисуем буквы как наборы скругленных палочек
-        draw_rounded_rect(r, curr_x, y, 10.0 * sc, 30.0 * sc, 5.0 * sc, color); 
-        curr_x += 15.0 * sc;
+        let (metrics, bitmap) = font.rasterize(c, size);
+        total_width += metrics.width as i32;
+        max_height = max_height.max(metrics.height as i32);
+        glyphs.push((metrics, bitmap));
+    }
+
+    let mut image = vec![0u8; (total_width * max_height) as usize];
+    let mut pen_x = 0;
+
+    for (metrics, bitmap) in glyphs {
+        for y in 0..metrics.height {
+            for x in 0..metrics.width {
+                let src = bitmap[y * metrics.width + x];
+                let dst = ((y as i32 * total_width) + pen_x + x as i32) as usize;
+                image[dst] = src;
+            }
+        }
+        pen_x += metrics.width as i32;
+    }
+
+    let tex = gl.create_texture().unwrap();
+    gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+
+    gl.tex_image_2d(
+        glow::TEXTURE_2D,
+        0,
+        glow::RED as i32,
+        total_width,
+        max_height,
+        0,
+        glow::RED,
+        glow::UNSIGNED_BYTE,
+        Some(&image),
+    );
+
+    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+    gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+
+    TextRenderer {
+        texture: tex,
+        width: total_width,
+        height: max_height,
     }
 }
 
-// ========== MAIN ==========
+// ================= MAIN =================
+
 #[no_mangle]
 pub fn android_main(app: AndroidApp) {
     android_logger::init_once(android_logger::Config::default());
+
+    let mut running = true;
+    let mut last_frame = Instant::now();
+
     let mut gl_ctx: Option<(*mut c_void, *mut c_void)> = None;
-    let mut ren: Option<Render> = None;
+    let mut gl: Option<glow::Context> = None;
+    let mut program: Option<glow::Program> = None;
+    let mut text: Option<TextRenderer> = None;
 
-    loop {
-        app.poll_events(Some(std::time::Duration::from_millis(16)), |event| {
-            match event {
-                PollEvent::Main(MainEvent::InitWindow { .. }) => {
+    while running {
+        app.poll_events(None, |event| {
+            if let PollEvent::Main(MainEvent::InitWindow { .. }) = event {
+                unsafe {
                     let win = app.native_window().unwrap();
-                    unsafe {
-                        let d = eglGetDisplay(ptr::null_mut());
-                        eglInitialize(d, ptr::null_mut(), ptr::null_mut());
-                        let attr = [0x3040, 4, 0x3038];
-                        let mut cfg: *mut c_void = ptr::null_mut();
-                        let mut n = 0;
-                        eglChooseConfig(d, attr.as_ptr(), &mut cfg, 1, &mut n);
-                        let mut f = 0;
-                        eglGetConfigAttrib(d, cfg, 0x302E, &mut f);
-                        ANativeWindow_setBuffersGeometry(win.ptr().as_ptr() as *mut _, 0, 0, f);
-                        let s = eglCreateWindowSurface(d, cfg, win.ptr().as_ptr() as *mut _, ptr::null_mut());
-                        let c = eglCreateContext(d, cfg, ptr::null_mut(), [0x3098, 2, 0x3038].as_ptr());
-                        eglMakeCurrent(d, s, s, c);
-                        
-                        let mut width = 0; let mut height = 0;
-                        eglQuerySurface(d, s, 0x3057, &mut width); eglQuerySurface(d, s, 0x3056, &mut height);
-                        SW = width as f32; SH = height as f32;
-                        let sc = get_scale();
-                        BTN_PLAY.x = SW/2.0 - (BTN_PLAY.w * sc)/2.0; BTN_PLAY.y = SH/2.0 + 80.0 * sc;
+                    let display = eglGetDisplay(ptr::null_mut());
+                    eglInitialize(display, ptr::null_mut(), ptr::null_mut());
 
-                        STARS = (0..100).map(|_| Star {
-                            x: rand::random::<f32>() * SW,
-                            y: rand::random::<f32>() * SH,
-                            speed: 40.0 + rand::random::<f32>() * 80.0,
-                            alpha: 0.5 + rand::random::<f32>() * 0.5,
-                            size: 2.0 + rand::random::<f32>() * 3.0,
-                        }).collect();
+                    let attrs = [0x3033, 4, 0x3038];
+                    let mut config = ptr::null_mut();
+                    let mut num = 0;
+                    eglChooseConfig(display, attrs.as_ptr(), &mut config, 1, &mut num);
 
-                        let gl = glow::Context::from_loader_function(|s| eglGetProcAddress(CString::new(s).unwrap().as_ptr()));
-                        let p = gl.create_program().unwrap();
-                        let vs = gl.create_shader(glow::VERTEX_SHADER).unwrap(); gl.shader_source(vs, VS); gl.compile_shader(vs);
-                        let fs = gl.create_shader(glow::FRAGMENT_SHADER).unwrap(); gl.shader_source(fs, FS); gl.compile_shader(fs);
-                        gl.attach_shader(p, vs); gl.attach_shader(p, fs); gl.link_program(p);
-                        
-                        let vbo = gl.create_buffer().unwrap();
-                        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-                        let verts: [f32; 12] = [0.0,0.0, 1.0,0.0, 1.0,1.0, 0.0,0.0, 1.0,1.0, 0.0,1.0];
-                        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, std::slice::from_raw_parts(verts.as_ptr() as *const u8, 48), glow::STATIC_DRAW);
-                        gl.enable_vertex_attrib_array(0); gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 0, 0);
-                        gl.enable(glow::BLEND); gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-                        
-                        gl_ctx = Some((d, s)); ren = Some(Render { gl, prog: p });
-                    }
+                    let surface = eglCreateWindowSurface(display, config, win.ptr().as_ptr() as *mut _, ptr::null());
+                    let context = eglCreateContext(display, config, ptr::null_mut(), [0x3098, 2, 0x3038].as_ptr());
+
+                    eglMakeCurrent(display, surface, surface, context);
+                    eglSwapInterval(display, 1);
+
+                    let mut w = 0;
+                    let mut h = 0;
+                    eglQuerySurface(display, surface, 0x3057, &mut w);
+                    eglQuerySurface(display, surface, 0x3056, &mut h);
+
+                    let gl_ctx_local = glow::Context::from_loader_function(|s| {
+                        eglGetProcAddress(CString::new(s).unwrap().as_ptr())
+                    });
+
+                    let prog = gl_ctx_local.create_program().unwrap();
+                    let vs = gl_ctx_local.create_shader(glow::VERTEX_SHADER).unwrap();
+                    gl_ctx_local.shader_source(vs, VS);
+                    gl_ctx_local.compile_shader(vs);
+
+                    let fs = gl_ctx_local.create_shader(glow::FRAGMENT_SHADER).unwrap();
+                    gl_ctx_local.shader_source(fs, FS);
+                    gl_ctx_local.compile_shader(fs);
+
+                    gl_ctx_local.attach_shader(prog, vs);
+                    gl_ctx_local.attach_shader(prog, fs);
+                    gl_ctx_local.link_program(prog);
+
+                    let verts: [f32; 12] = [
+                        0.0,0.0, 1.0,0.0, 1.0,1.0,
+                        0.0,0.0, 1.0,1.0, 0.0,1.0
+                    ];
+
+                    let vbo = gl_ctx_local.create_buffer().unwrap();
+                    gl_ctx_local.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+                    gl_ctx_local.buffer_data_u8_slice(
+                        glow::ARRAY_BUFFER,
+                        std::slice::from_raw_parts(verts.as_ptr() as *const u8, 48),
+                        glow::STATIC_DRAW,
+                    );
+
+                    gl_ctx_local.enable_vertex_attrib_array(0);
+                    gl_ctx_local.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 0, 0);
+
+                    let font_bytes = app.asset_manager().open("Font.ttf").unwrap().buffer().unwrap().to_vec();
+                    let font = Font::from_bytes(font_bytes, fontdue::FontSettings::default()).unwrap();
+
+                    let text_renderer = create_text_texture(&gl_ctx_local, &font, "CUBIC BATTLE", 64.0);
+
+                    gl = Some(gl_ctx_local);
+                    program = Some(prog);
+                    text = Some(text_renderer);
+                    gl_ctx = Some((display, surface));
                 }
-                PollEvent::Main(MainEvent::Destroy) => { gl_ctx = None; ren = None; }
-                _ => {}
+            }
+
+            if let PollEvent::Main(MainEvent::Destroy) = event {
+                running = false;
             }
         });
 
-        // Update Stars
-        unsafe {
-            let dt = 0.016;
-            for s in &mut STARS {
-                s.x += s.speed * dt; s.y += s.speed * dt;
-                if s.x > SW || s.y > SH { s.x = 0.0; s.y = rand::random::<f32>() * SH; }
-            }
-        }
+        let _dt = last_frame.elapsed().as_secs_f32();
+        last_frame = Instant::now();
 
-        if let Ok(mut iter) = app.input_events_iter() {
-            while iter.next(|ev| {
-                if let android_activity::input::InputEvent::MotionEvent(m) = ev {
-                    if m.action() == android_activity::input::MotionAction::Down {
-                        let x = m.pointer_at_index(0).x(); let y = m.pointer_at_index(0).y();
-                        unsafe {
-                            let sc = get_scale();
-                            if STATE == GameState::Lobby && x > BTN_PLAY.x && x < BTN_PLAY.x + BTN_PLAY.w * sc && y > BTN_PLAY.y && y < BTN_PLAY.y + BTN_PLAY.h * sc {
-                                STATE = GameState::Game;
-                            }
-                        }
-                    }
-                }
-                InputStatus::Handled
-            }) {}
-        }
-
-        if let (Some((d, s)), Some(r)) = (gl_ctx, &ren) {
-            let gl = &r.gl;
+        if let (Some((display, surface)), Some(gl), Some(program), Some(text)) =
+            (&gl_ctx, &gl, &program, &text)
+        {
             unsafe {
-                gl.viewport(0, 0, SW as i32, SH as i32);
-                gl.use_program(Some(r.prog));
-                gl.uniform_2_f32(gl.get_uniform_location(r.prog, "u_res").as_ref(), SW, SH);
+                gl.viewport(0, 0, 1280, 720);
+                gl.clear_color(0.05, 0.1, 0.2, 1.0);
+                gl.clear(glow::COLOR_BUFFER_BIT);
 
-                if STATE == GameState::Lobby {
-                    // 1. Градиент (как в Lua)
-                    gl.uniform_1_i32(gl.get_uniform_location(r.prog, "u_mode").as_ref(), 0);
-                    gl.uniform_4_f32(gl.get_uniform_location(r.prog, "u_c1").as_ref(), 0.02, 0.00, 0.10, 1.0);
-                    gl.uniform_4_f32(gl.get_uniform_location(r.prog, "u_c2").as_ref(), 0.00, 0.05, 0.25, 1.0);
-                    gl.uniform_4_f32(gl.get_uniform_location(r.prog, "u_c3").as_ref(), 0.10, 0.15, 0.45, 1.0);
-                    gl.uniform_4_f32(gl.get_uniform_location(r.prog, "u_c4").as_ref(), 0.05, 0.10, 0.35, 1.0);
-                    gl.draw_arrays(glow::TRIANGLES, 0, 6);
+                gl.use_program(Some(*program));
+                gl.bind_texture(glow::TEXTURE_2D, Some(text.texture));
+                gl.uniform_4_f32(
+                    gl.get_uniform_location(*program, "u_color").as_ref(),
+                    1.0, 1.0, 1.0, 1.0
+                );
 
-                    // 2. Звезды
-                    gl.uniform_1_i32(gl.get_uniform_location(r.prog, "u_mode").as_ref(), 1);
-                    for star in &STARS {
-                        draw_rounded_rect(r, star.x, star.y, star.size, star.size, star.size/2.0, vec4(1.0, 1.0, 1.0, star.alpha));
-                    }
+                gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
-                    // 3. Заголовки (Векторные)
-                    let sc = get_scale();
-                    draw_text(r, "CUBIC BATTLE", SW/2.0 - 150.0*sc, SH/2.0 - 150.0*sc, 10.0*sc, vec4(1.0, 1.0, 1.0, 1.0));
-                    draw_text(r, "TOUCH & DODGE", SW/2.0 - 100.0*sc, SH/2.0 - 60.0*sc, 5.0*sc, vec4(1.0, 1.0, 1.0, 1.0));
-
-                    // 4. Кнопка
-                    let b = BTN_PLAY;
-                    draw_rounded_rect(r, b.x + 5.0*sc, b.y + 6.0*sc, b.w*sc, b.h*sc, 16.0*sc, vec4(0.1, 0.0, 0.2, 0.5)); // Тень
-                    draw_rounded_rect(r, b.x - 2.0*sc, b.y - 2.0*sc, (b.w+4.0)*sc, (b.h+4.0)*sc, 18.0*sc, vec4(0.0, 0.0, 0.0, 1.0)); // Обводка
-                    draw_rounded_rect(r, b.x, b.y, b.w*sc, b.h*sc, 16.0*sc, vec4(0.35, 0.15, 0.75, 1.0)); // Кнопка
-                    draw_text(r, "PLAY", b.x + 80.0*sc, b.y + 22.0*sc, 6.0*sc, vec4(1.0, 1.0, 1.0, 1.0));
-                } else {
-                    gl.clear_color(0.2, 0.6, 1.0, 1.0); gl.clear(glow::COLOR_BUFFER_BIT);
-                }
-                eglSwapBuffers(d, s);
+                eglSwapBuffers(*display, *surface);
             }
         }
     }
-                                                                                       }
+                        }
