@@ -1,4 +1,4 @@
-use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
+use android_activity::{AndroidApp, MainEvent, PollEvent};
 use glam::*;
 use glow::*;
 use log::info;
@@ -29,15 +29,17 @@ const EGL_WIDTH: i32 = 0x3057;
 const EGL_HEIGHT: i32 = 0x3056;
 
 // ========== GAME STATE ==========
-#[derive(PartialEq, Eq)]
+// Добавляем Clone, Copy, чтобы Rust мог легко копировать структуры как в Lua
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum GameState {
     Lobby,
     Game,
 }
 
-static mut CURRENT_STATE: GameState = GameState::Lobby;
-
+#[derive(Clone, Copy)]
 struct Button { w: f32, h: f32, x: f32, y: f32 }
+
+static mut CURRENT_STATE: GameState = GameState::Lobby;
 static mut LOBBY_BTN: Button = Button { w: 220.0, h: 75.0, x: 0.0, y: 0.0 };
 static mut SCREEN_W: f32 = 0.0;
 static mut SCREEN_H: f32 = 0.0;
@@ -104,7 +106,7 @@ unsafe fn draw_rect(rs: &RenderState, x: f32, y: f32, w: f32, h: f32, color: Vec
     gl.buffer_data_u8_slice(ARRAY_BUFFER, std::slice::from_raw_parts(
         vertices.as_ptr() as *const u8,
         std::mem::size_of_val(&vertices)
-    ), STATIC_DRAW);
+    ), DYNAMIC_DRAW); // DYNAMIC_DRAW так как мы обновляем вершины каждый кадр
 
     gl.uniform_4_f32(Some(&rs.u_color), color.x, color.y, color.z, color.w);
     gl.uniform_2_f32(Some(&rs.u_res), sw, sh);
@@ -139,6 +141,7 @@ unsafe fn draw_lobby(rs: &RenderState) {
     let sub_w = "TOUCH & DODGE".len() as f32 * sub_size * 1.2;
     draw_cubic_text(rs, "TOUCH & DODGE", w/2.0 - sub_w/2.0, h/2.0 - 60.0, sub_size, vec4(1.0, 1.0, 1.0, 1.0), w, h);
 
+    // Теперь можно безопасно копировать структуру кнопки
     let btn = LOBBY_BTN;
     draw_rect(rs, btn.x+5.0, btn.y+6.0, btn.w, btn.h, vec4(0.0, 0.0, 0.0, 0.2), w, h);
     draw_rect(rs, btn.x, btn.y, btn.w, btn.h, vec4(0.55, 0.20, 0.85, 1.0), w, h);
@@ -161,7 +164,7 @@ pub fn android_main(app: AndroidApp) {
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Trace));
     info!("Cubic Battle запущен на Rust!");
 
-    // Настройка обработки нажатий (Input) для android-activity 0.5
+    // Настройка обработки нажатий для android-activity 0.5 (без возврата InputStatus)
     app.set_input_callback(|_app, input_event| {
         if let Some(motion) = input_event.as_motion_event() {
             if motion.get_action() == 0 { // ACTION_DOWN
@@ -178,7 +181,6 @@ pub fn android_main(app: AndroidApp) {
                 }
             }
         }
-        InputStatus::Handled
     });
 
     let mut gl_ctx: Option<GlContext> = None;
@@ -244,4 +246,4 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
-                    }
+                                   }
