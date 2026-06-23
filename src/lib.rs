@@ -38,6 +38,12 @@ extern "C" {
     fn eglSwapInterval(dpy: *mut c_void, interval: i32) -> i32;
     fn eglSwapBuffers(dpy: *mut c_void, surface: *mut c_void) -> i32;
     fn eglGetProcAddress(procname: *const std::os::raw::c_char) -> *mut c_void;
+    fn eglQuerySurface(
+        dpy: *mut c_void,
+        surface: *mut c_void,
+        attribute: i32,
+        value: *mut i32,
+    ) -> i32;
 }
 
 pub enum Scene {
@@ -56,6 +62,9 @@ pub fn android_main(app: AndroidApp) {
     let mut surface: *mut c_void = ptr::null_mut();
     let mut gl: Option<glow::Context> = None;
 
+    let mut width = 0;
+    let mut height = 0;
+
     while running {
         app.poll_events(None, |event| {
             match event {
@@ -63,6 +72,8 @@ pub fn android_main(app: AndroidApp) {
                     let window = app.native_window().unwrap();
 
                     display = eglGetDisplay(ptr::null_mut());
+                    if display.is_null() { return; }
+
                     eglInitialize(display, ptr::null_mut(), ptr::null_mut());
 
                     let config_attribs = [
@@ -91,10 +102,7 @@ pub fn android_main(app: AndroidApp) {
                         ptr::null(),
                     );
 
-                    let context_attribs = [
-                        0x3098, 3,
-                        0x3038
-                    ];
+                    let context_attribs = [0x3098, 3, 0x3038];
 
                     let context = eglCreateContext(
                         display,
@@ -105,6 +113,9 @@ pub fn android_main(app: AndroidApp) {
 
                     eglMakeCurrent(display, surface, surface, context);
                     eglSwapInterval(display, 1);
+
+                    eglQuerySurface(display, surface, 0x3057, &mut width);
+                    eglQuerySurface(display, surface, 0x3056, &mut height);
 
                     let gl_ctx = glow::Context::from_loader_function(|s| {
                         eglGetProcAddress(CString::new(s).unwrap().as_ptr())
@@ -120,14 +131,16 @@ pub fn android_main(app: AndroidApp) {
 
         if let Some(gl) = &gl {
             unsafe {
+                gl.viewport(0, 0, width, height);
+
                 match scene {
                     Scene::Lobby => {
-                        if lobby::render(gl, &app) {
+                        if lobby::render(gl, &app, width, height) {
                             scene = Scene::Settings;
                         }
                     }
                     Scene::Settings => {
-                        if settings::render(gl, &app) {
+                        if settings::render(gl, &app, width, height) {
                             scene = Scene::Lobby;
                         }
                     }
