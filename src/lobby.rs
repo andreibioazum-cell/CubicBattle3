@@ -9,7 +9,6 @@ pub fn render(gl: &glow::Context, app: &AndroidApp, width: i32, height: i32) -> 
         gl.clear(glow::COLOR_BUFFER_BIT);
     }
 
-    // Загрузка шрифта (безопасная, без unwrap паники)
     static mut FONT: Option<Font> = None;
     unsafe {
         if FONT.is_none() {
@@ -25,7 +24,7 @@ pub fn render(gl: &glow::Context, app: &AndroidApp, width: i32, height: i32) -> 
 
     let mut go_settings = false;
     let (bw, bh) = (width as f32 * 0.4, height as f32 * 0.15);
-    let (bx, by) = ((width as f32 - bw)/2.0, (height as f32 - bh)/2.0);
+    let (bx, by) = ((width as f32 - bw) / 2.0, (height as f32 - bh) / 2.0);
 
     if let Ok(mut iter) = app.input_events_iter() {
         while iter.next(|ev| {
@@ -33,7 +32,9 @@ pub fn render(gl: &glow::Context, app: &AndroidApp, width: i32, height: i32) -> 
                 if m.action() == MotionAction::Down {
                     let x = m.pointer_at_index(0).x();
                     let y = m.pointer_at_index(0).y();
-                    if x > bx && x < bx + bw && y > by && y < by + bh { go_settings = true; }
+                    if x > bx && x < bx + bw && y > by && y < by + bh { 
+                        go_settings = true; 
+                    }
                 }
             }
             InputStatus::Handled
