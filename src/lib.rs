@@ -1,4 +1,4 @@
-use android_activity::{AndroidApp, InputEvent, MainEvent, PollEvent};
+use android_activity::{AndroidApp, MainEvent, PollEvent};
 use glam::*;
 use glow::*;
 use log::info;
@@ -111,7 +111,6 @@ unsafe fn draw_rect(rs: &RenderState, x: f32, y: f32, w: f32, h: f32, color: Vec
     gl.uniform_2_f32(Some(&rs.u_res), sw, sh);
 
     gl.enable_vertex_attrib_array(0);
-    // ИСПРАВЛЕНО: добавлен аргумент FLOAT (0x1406) для 3-го параметра
     gl.vertex_attrib_pointer_f32(0, 2, FLOAT, false, 0, 0);
     gl.draw_arrays(TRIANGLES, 0, 6);
     gl.disable_vertex_attrib_array(0);
@@ -167,13 +166,11 @@ pub fn android_main(app: AndroidApp) {
     let mut render_state: Option<RenderState> = None;
 
     loop {
-        // ИСПРАВЛЕНО: Ввод обрабатывается внутри poll_events в android-activity 0.5
         app.poll_events(None, |event| {
             match event {
                 PollEvent::Main(MainEvent::InitWindow { .. }) => {
                     let window = app.native_window().expect("No window");
                     unsafe {
-                        // ИСПРАВЛЕНО: правильное преобразование указателя окна
                         if let Some(ctx) = init_egl(window.ptr().as_ptr() as *mut c_void) {
                             let gl = ctx.gl;
                             
@@ -206,7 +203,6 @@ pub fn android_main(app: AndroidApp) {
                     gl_ctx = None;
                     render_state = None;
                 }
-                // ИСПРАВЛЕНО: Обработка нажатий через PollEvent::Input
                 PollEvent::Input(input_event) => {
                     if let Some(motion) = input_event.as_motion_event() {
                         if motion.get_action() == 0 { // ACTION_DOWN
@@ -246,4 +242,4 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
-}
+                }
