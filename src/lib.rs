@@ -5,7 +5,7 @@ use log::info;
 use std::ffi::c_void;
 use std::ptr;
 
-// ========== FFI BINDINGS (Заглушки для EGL и NDK) ==========
+// ========== FFI BINDINGS ==========
 extern "C" {
     fn eglGetDisplay(display_id: *mut c_void) -> *mut c_void;
     fn eglInitialize(display: *mut c_void, major: *mut i32, minor: *mut i32) -> i32;
@@ -30,10 +30,7 @@ const EGL_HEIGHT: i32 = 0x3056;
 
 // ========== GAME STATE ==========
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum GameState {
-    Lobby,
-    Game,
-}
+enum GameState { Lobby, Game }
 
 #[derive(Clone, Copy)]
 struct Button { w: f32, h: f32, x: f32, y: f32 }
@@ -45,7 +42,7 @@ static mut SCREEN_H: f32 = 0.0;
 
 unsafe fn place_lobby() {
     LOBBY_BTN.x = SCREEN_W / 2.0 - LOBBY_BTN.w / 2.0;
-    LOBBY_BTN.y = SCREEN_H / 2.0 + 50.0;
+    LOBBY_BTN.y = SCREEN_W / 2.0 + 50.0;
 }
 
 // ========== GL STRUCTURES ==========
@@ -89,9 +86,7 @@ unsafe fn init_egl(window: *mut c_void) -> Option<GlContext> {
     SCREEN_W = w as f32;
     SCREEN_H = h as f32;
 
-    let gl = Context::from_loader_function(|sym| {
-        eglGetProcAddress(sym.as_ptr() as *const u8) as *const c_void
-    });
+    let gl = Context::from_loader_function(|sym| eglGetProcAddress(sym.as_ptr() as *const u8) as *const c_void);
 
     Some(GlContext { display, surface, context, gl })
 }
@@ -102,10 +97,7 @@ unsafe fn draw_rect(rs: &RenderState, x: f32, y: f32, w: f32, h: f32, color: Vec
     let vertices: [f32; 12] = [x, y, x+w, y, x+w, y+h, x, y, x+w, y+h, x, y+h];
 
     gl.bind_buffer(ARRAY_BUFFER, Some(rs.vbo));
-    gl.buffer_data_u8_slice(ARRAY_BUFFER, std::slice::from_raw_parts(
-        vertices.as_ptr() as *const u8,
-        std::mem::size_of_val(&vertices)
-    ), DYNAMIC_DRAW);
+    gl.buffer_data_u8_slice(ARRAY_BUFFER, std::slice::from_raw_parts(vertices.as_ptr() as *const u8, std::mem::size_of_val(&vertices)), DYNAMIC_DRAW);
 
     gl.uniform_4_f32(Some(&rs.u_color), color.x, color.y, color.z, color.w);
     gl.uniform_2_f32(Some(&rs.u_res), sw, sh);
@@ -119,17 +111,13 @@ unsafe fn draw_rect(rs: &RenderState, x: f32, y: f32, w: f32, h: f32, color: Vec
 unsafe fn draw_cubic_text(rs: &RenderState, text: &str, x: f32, y: f32, size: f32, color: Vec4, sw: f32, sh: f32) {
     let mut offset = 0.0;
     for c in text.chars() {
-        if c != ' ' {
-            draw_rect(rs, x + offset, y, size * 0.8, size, color, sw, sh);
-        }
+        if c != ' ' { draw_rect(rs, x + offset, y, size * 0.8, size, color, sw, sh); }
         offset += size * 1.2;
     }
 }
 
 unsafe fn draw_lobby(rs: &RenderState) {
-    let w = SCREEN_W;
-    let h = SCREEN_H;
-
+    let w = SCREEN_W; let h = SCREEN_H;
     draw_rect(rs, 0.0, 0.0, w, h, vec4(0.55, 0.20, 0.85, 1.0), w, h);
 
     let title_size = 40.0;
@@ -144,8 +132,7 @@ unsafe fn draw_lobby(rs: &RenderState) {
     draw_rect(rs, btn.x+5.0, btn.y+6.0, btn.w, btn.h, vec4(0.0, 0.0, 0.0, 0.2), w, h);
     draw_rect(rs, btn.x, btn.y, btn.w, btn.h, vec4(0.55, 0.20, 0.85, 1.0), w, h);
 
-    let border = vec4(0.0, 0.0, 0.0, 1.0);
-    let t = 3.4;
+    let border = vec4(0.0, 0.0, 0.0, 1.0); let t = 3.4;
     draw_rect(rs, btn.x, btn.y, btn.w, t, border, w, h);
     draw_rect(rs, btn.x, btn.y + btn.h - t, btn.w, t, border, w, h);
     draw_rect(rs, btn.x, btn.y, t, btn.h, border, w, h);
@@ -173,7 +160,6 @@ pub fn android_main(app: AndroidApp) {
                     unsafe {
                         if let Some(ctx) = init_egl(window.ptr().as_ptr() as *mut c_void) {
                             let gl = ctx.gl;
-                            
                             place_lobby();
 
                             let vs = gl.create_shader(VERTEX_SHADER).unwrap();
@@ -203,26 +189,28 @@ pub fn android_main(app: AndroidApp) {
                     gl_ctx = None;
                     render_state = None;
                 }
-                PollEvent::Input(input_event) => {
-                    if let Some(motion) = input_event.as_motion_event() {
-                        if motion.get_action() == 0 { // ACTION_DOWN
-                            let x = motion.get_x(0) as f32;
-                            let y = motion.get_y(0) as f32;
-                            unsafe {
-                                if CURRENT_STATE == GameState::Lobby {
-                                    let btn = LOBBY_BTN;
-                                    if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
-                                        info!("Кнопка PLAY нажата!");
-                                        CURRENT_STATE = GameState::Game;
-                                    }
-                                }
+                _ => {}
+            }
+        });
+
+        // ИСПРАВЛЕНО: Ввод читается вручную через input_events() в android-activity 0.5
+        for input in app.input_events() {
+            if let Some(motion) = input.as_motion_event() {
+                if motion.get_action() == 0 { // ACTION_DOWN
+                    let x = motion.get_x(0) as f32;
+                    let y = motion.get_y(0) as f32;
+                    unsafe {
+                        if CURRENT_STATE == GameState::Lobby {
+                            let btn = LOBBY_BTN;
+                            if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
+                                info!("Кнопка PLAY нажата!");
+                                CURRENT_STATE = GameState::Game;
                             }
                         }
                     }
                 }
-                _ => {}
             }
-        });
+        }
 
         if let (Some(ctx), Some(rs)) = (&gl_ctx, &render_state) {
             let gl = &rs.gl;
@@ -242,4 +230,4 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
-                }
+    }
