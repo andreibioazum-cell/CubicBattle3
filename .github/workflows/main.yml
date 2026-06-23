@@ -1,11 +1,11 @@
-name: Build Rust Software Renderer
+name: Build APK
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -19,17 +19,18 @@ jobs:
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r25c # Стабильная версия для Rust
+          ndk-version: r25c
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+      - name: Install cargo-apk
+        run: cargo install cargo-apk
 
-      - name: Build Library
-        run: |
-          cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release
+      - name: Build APK
+        # Собираем в режиме release для скорости
+        run: cargo apk build --release
 
-      - name: Upload Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cubicbattle-lib
-          path: target/aarch64-linux-android/release/libcubicbattle.so
+          name: CubicBattle-Release-APK
+          # Путь, куда cargo-apk кладет готовый файл
+          path: target/release/apk/cubicbattle.apk
