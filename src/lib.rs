@@ -33,7 +33,7 @@ const EGL_CONTEXT_CLIENT_VERSION: i32 = 0x3098;
 const EGL_WIDTH: i32 = 0x3057;
 const EGL_HEIGHT: i32 = 0x3056;
 
-// ========== GAME LOGIC ==========
+// ========== GAME STATE ==========
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GameState { Lobby, Game }
 
@@ -50,7 +50,7 @@ unsafe fn place_lobby() {
     LOBBY_BTN.y = SCREEN_H / 2.0 + 50.0;
 }
 
-// ========== RENDER STRUCTURES ==========
+// ========== STRUCTURES ==========
 struct GlContext {
     display: *mut c_void,
     surface: *mut c_void,
@@ -91,7 +91,7 @@ unsafe fn init_egl(native_window: *mut c_void) -> Option<GlContext> {
 
     let gl = glow::Context::from_loader_function(|sym| {
         let c_str = CString::new(sym).unwrap();
-        eglGetProcAddress(c_str.as_ptr() as *const std::os::raw::c_char)
+        eglGetProcAddress(c_str.as_ptr() as *const _)
     });
 
     Some(GlContext { display, surface, gl })
@@ -114,7 +114,6 @@ unsafe fn init_renderer(gl: &glow::Context) -> RenderState {
     gl.attach_shader(program, fs);
     gl.bind_attrib_location(program, 0, "a_pos");
     gl.link_program(program);
-    gl.use_program(Some(program));
 
     let u_color = gl.get_uniform_location(program, "u_color").unwrap();
     let u_res = gl.get_uniform_location(program, "u_res").unwrap();
@@ -155,13 +154,14 @@ unsafe fn draw_lobby(gl: &glow::Context, rs: &RenderState) {
     draw_rect(gl, rs, btn.x, btn.y, btn.w, btn.h, vec4(0.55, 0.20, 0.85, 1.0));
     
     let t = 3.4;
-    draw_rect(gl, rs, btn.x, btn.y, btn.w, t, vec4(0.0, 0.0, 0.0, 1.0));
-    draw_rect(gl, rs, btn.x, btn.y + btn.h - t, btn.w, t, vec4(0.0, 0.0, 0.0, 1.0));
-    draw_rect(gl, rs, btn.x, btn.y, t, btn.h, vec4(0.0, 0.0, 0.0, 1.0));
-    draw_rect(gl, rs, btn.x + btn.w - t, btn.y, t, btn.h, vec4(0.0, 0.0, 0.0, 1.0));
+    let border = vec4(0.0, 0.0, 0.0, 1.0);
+    draw_rect(gl, rs, btn.x, btn.y, btn.w, t, border);
+    draw_rect(gl, rs, btn.x, btn.y + btn.h - t, btn.w, t, border);
+    draw_rect(gl, rs, btn.x, btn.y, t, btn.h, border);
+    draw_rect(gl, rs, btn.x + btn.w - t, btn.y, t, btn.h, border);
 }
 
-// ========== MAIN ENTRY POINT ==========
+// ========== MAIN ==========
 #[no_mangle]
 pub fn android_main(app: AndroidApp) {
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Trace));
@@ -170,7 +170,7 @@ pub fn android_main(app: AndroidApp) {
     let mut rs: Option<RenderState> = None;
 
     loop {
-        app.poll_events(None, |event| match event {
+        app.poll_events(Some(std::time::Duration::from_millis(0)), |event| match event {
             PollEvent::Main(MainEvent::InitWindow { .. }) => {
                 let win = app.native_window().unwrap();
                 unsafe {
@@ -188,26 +188,24 @@ pub fn android_main(app: AndroidApp) {
             _ => {}
         });
 
-        // ИСПРАВЛЕННЫЙ ВВОД для android-activity 0.5.2
-        if let Ok(iter) = app.input_events_iter() {
-            for input in iter {
+        // ПРАВИЛЬНЫЙ ВВОД для android-activity 0.5.2
+        if let Ok(mut iter) = app.input_events_iter() {
+            while iter.next(|input| {
                 if let android_activity::input::InputEvent::MotionEvent(motion) = input {
                     if motion.action() == android_activity::input::MotionAction::Down {
-                        let pointer = motion.pointer_at_index(0);
-                        let x = pointer.x();
-                        let y = pointer.y();
+                        let x = motion.pointer_at_index(0).x();
+                        let y = motion.pointer_at_index(0).y();
                         unsafe {
                             if CURRENT_STATE == GameState::Lobby {
                                 let btn = LOBBY_BTN;
                                 if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
-                                    info!("PLAY pressed!");
                                     CURRENT_STATE = GameState::Game;
                                 }
                             }
                         }
                     }
                 }
-            }
+            }) {}
         }
 
         if let (Some(ref ctx), Some(ref r)) = (&gl_ctx, &rs) {
@@ -224,4 +222,4 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
-}
+        }
