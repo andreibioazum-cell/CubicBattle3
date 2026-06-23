@@ -1,105 +1,88 @@
-name: Build Pure Rust APK
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+name: Migrate to C
+on: 
+  workflow_dispatch: # Запуск вручную
 
 jobs:
-  build:
+  burn_rust_build_c:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android NDK
+      - name: Delete Rust stuff
         run: |
-          echo "y" | sdkmanager "ndk;26.1.10909125"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          rm -rf src/*.rs
+          rm -f Cargo.toml
+          rm -f Cargo.lock
+          mkdir -p jni
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
-
-      - name: Build Rust Library
+      - name: Create CMakeLists.txt
         run: |
-          cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release
+          cat <<EOF > CMakeLists.txt
+          cmake_minimum_required(VERSION 3.10.2)
+          project(cubicbattle)
+          add_library(cubicbattle SHARED jni/main.c)
+          find_library(log-lib log)
+          find_library(android-lib android)
+          find_library(egl-lib EGL)
+          find_library(gles-lib GLESv3)
+          target_link_libraries(cubicbattle android native_app_glue \${log-lib} \${android-lib} \${egl-lib} \${gles-lib})
+          EOF
 
-      - name: Generate Android Project & Package APK
+      - name: Create main.c
         run: |
-          mkdir -p app/src/main/res/values
+          cat <<EOF > jni/main.c
+          #include <EGL/egl.h>
+          #include <GLES3/gl3.h>
+          #include <android/log.h>
+          #include <android_native_app_glue.h>
+          #include <stdlib.h>
 
-          cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application
-                  android:label="Cubic Battle"
-                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
-                  <activity android:name="android.app.NativeActivity"
-                            android:exported="true"
-                            android:screenOrientation="sensorLandscape"
-                            android:configChanges="orientation|keyboardHidden|screenSize">
-                      <meta-data android:name="android.app.lib_name" android:value="cubicbattle" />
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
+          #define LOG_TAG "CubicBattle"
+          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-          cat << 'EOF' > app/src/main/res/values/strings.xml
-          <resources><string name="app_name">Cubic Battle</string></resources>
-          EOF
-
-          cat << 'EOF' > settings.gradle
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
-          rootProject.name = "CubicBattle"
-          include ':app'
-          EOF
-
-          cat << 'EOF' > build.gradle
-          plugins { id 'com.android.application' version '8.2.0' apply false }
-          EOF
-
-          cat << 'EOF' > app/build.gradle
-          plugins { id 'com.android.application' }
-          android {
-              namespace 'com.cubicbattle.nativeapp'
-              compileSdk 34
-              defaultConfig {
-                  applicationId "com.cubicbattle.nativeapp"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
-                  ndk { abiFilters 'arm64-v8a' }
+          void android_main(struct android_app* state) {
+              LOGI("C version started! No more blue screens!");
+              while (1) {
+                  int ident, events;
+                  struct android_poll_source* source;
+                  while ((ident = ALooper_pollAll(0, NULL, &events, (void**)&source)) >= 0) {
+                      if (source != NULL) source->process(state, source);
+                      if (state->destroyRequested != 0) return;
+                  }
+                  // Тут будет рендер
               }
           }
           EOF
 
-          gradle wrapper --gradle-version 8.5
-          chmod +x gradlew
-          ./gradlew assembleDebug
+      - name: Create NEW CI (build-c.yml)
+        run: |
+          mkdir -p .github/workflows
+          cat <<EOF > .github/workflows/build-c.yml
+          name: Build C APK
+          on: [push]
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Set up NDK
+                  uses: nttld/setup-ndk@v1
+                  with:
+                    ndk-version: r25c
+                - name: Build with CMake
+                  run: |
+                    cmake -DCMAKE_TOOLCHAIN_FILE=\$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+                          -DANDROID_ABI=arm64-v8a \
+                          -DANDROID_PLATFORM=android-24 \
+                          .
+                    make
+          EOF
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: CubicBattle-Rust-APK
-          path: app/build/outputs/apk/debug/*.apk
+      - name: Commit and Push
+        run: |
+          git config --global user.name "C-Migrator"
+          git config --global user.email "migrator@example.com"
+          git add .
+          git commit -m "Migration to C: Rust is dead 🦭🔥"
+          git push
