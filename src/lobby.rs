@@ -14,13 +14,16 @@ pub fn render(gl: &glow::Context, app: &AndroidApp) -> bool {
         gl.clear(glow::COLOR_BUFFER_BIT);
     }
 
-    // ===== Загрузка шрифта (один раз через lazy static) =====
+    // ===== Загрузка шрифта (один раз через static mut) =====
     static mut FONT: Option<Font> = None;
 
     unsafe {
         if FONT.is_none() {
             let filename = CString::new("Font.ttf").unwrap();
-            let asset = app.asset_manager().open(&filename).unwrap();
+            
+            // 👇 ДОБАВИЛ `mut` СЮДА
+            let mut asset = app.asset_manager().open(&filename).unwrap();
+            
             let buffer = asset.buffer().unwrap().to_vec();
 
             FONT = Some(
@@ -40,7 +43,7 @@ pub fn render(gl: &glow::Context, app: &AndroidApp) -> bool {
                     let x = motion.pointer_at_index(0).x();
                     let y = motion.pointer_at_index(0).y();
 
-                    // Кнопка по центру
+                    // Кнопка по центру (зона 500-780 x, 300-380 y)
                     if x > 500.0 && x < 780.0 && y > 300.0 && y < 380.0 {
                         go_settings = true;
                     }
