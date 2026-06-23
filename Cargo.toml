@@ -1,13 +1,10 @@
-[package]
-name = "cubicbattle"
-version = "0.1.0"
-edition = "2021"
+[package.metadata.android]
+package = "com.cubicbattle.game"
+label = "Cubic Battle"
+assets = "assets"
+# Разрешаем полноэкранный режим
+opencv = false
 
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-android-activity = { version = "0.6", features = ["native-activity"] }
-android_logger = "0.14"
-log = "0.4"
-ndk = "0.9" # Для работы с сырым буфером окна
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.vulkan.version"
+required = false
