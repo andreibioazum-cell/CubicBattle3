@@ -30,14 +30,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android # Только 64-бит
+          targets: aarch64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
       - name: Build Rust Library
         run: |
-          # Компилируем Rust ТОЛЬКО под 64-бит (arm64-v8a)
           cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release
 
       - name: Generate Android Project & Package APK
@@ -94,7 +93,7 @@ jobs:
           }
           EOF
 
-          # Gradle только упаковывает готовый .so в APK
+          # ИСПРАВЛЕННЫЙ app/build.gradle (убран символ # из комментария)
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -109,7 +108,7 @@ jobs:
                   versionCode 1
                   versionName "1.0"
                   ndk {
-                      abiFilters 'arm64-v8a' # Только 64-бит!
+                      abiFilters 'arm64-v8a' // Только 64-бит
                   }
               }
           }
