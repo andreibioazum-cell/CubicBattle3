@@ -1,4 +1,4 @@
-use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
+use android_activity::{AndroidApp, MainEvent, PollEvent};
 use log::info;
 
 // Точка входа в Android приложение на Rust
@@ -15,7 +15,7 @@ pub fn android_main(app: AndroidApp) {
 
     // Главный цикл игры
     loop {
-        // Обработка событий Android (создание окна, пауза, ввод)
+        // Обработка событий Android (создание окна, пауза и т.д.)
         app.poll_events(
             None, // Бесконечный таймаут ожидания
             |event| {
@@ -28,18 +28,15 @@ pub fn android_main(app: AndroidApp) {
                         info!("Закрытие приложения.");
                         window_created = false;
                     }
-                    PollEvent::Input(input_event) => {
-                        // Тут мы будем обрабатывать тач и клавиатуру
-                        let _ = input_event; // Пока просто игнорируем
-                    }
                     _ => {}
                 }
-                InputStatus::Handled
+                // В новой версии callback ничего не возвращает (просто убрали return)
             },
         );
 
         if window_created {
             // Тут будет игровой цикл, обновление логики и рендер OpenGL
+            // Пока что мы просто "держим" окно открытым
         }
     }
 }
