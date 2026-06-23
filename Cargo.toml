@@ -11,5 +11,6 @@ android-activity = { version = "0.5", features = ["native-activity"] }
 log = "0.4"
 android_logger = "0.13"
 glam = "0.24"
-glow = "0.13" # Для OpenGL
-libc = "0.2"  # Для EGL
+glow = "0.13"
+libc = "0.2"
+rand = "0.8"
