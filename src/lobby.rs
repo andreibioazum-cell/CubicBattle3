@@ -1,55 +1,43 @@
-use android_activity::{
-    AndroidApp,
-    input::{InputEvent, MotionAction},
-    InputStatus,
-};
+use android_activity::{AndroidApp, input::{InputEvent, MotionAction}, InputStatus};
 use glow::HasContext;
+use fontdue::Font;
+use std::ffi::CString;
 
-/// Lobby сцена
-/// Возвращает true если нужно перейти в Settings
-pub fn render(
-    gl: &glow::Context,
-    app: &AndroidApp,
-    width: i32,
-    height: i32,
-) -> bool {
+pub fn render(gl: &glow::Context, app: &AndroidApp, width: i32, height: i32) -> bool {
     unsafe {
-        // Фон
-        gl.clear_color(0.1, 0.15, 0.35, 1.0);
+        gl.clear_color(0.1, 0.15, 0.3, 1.0);
         gl.clear(glow::COLOR_BUFFER_BIT);
     }
 
-    // ===== КНОПКА SETTINGS =====
-    // Кнопка по центру экрана
-    let button_width = width as f32 * 0.3;
-    let button_height = height as f32 * 0.12;
-
-    let button_x = (width as f32 - button_width) * 0.5;
-    let button_y = (height as f32 - button_height) * 0.5;
-
-    let mut go_settings = false;
-
-    // ===== INPUT =====
-    if let Ok(mut iter) = app.input_events_iter() {
-        while iter.next(|event| {
-            if let InputEvent::MotionEvent(motion) = event {
-                if motion.action() == MotionAction::Down {
-                    let x = motion.pointer_at_index(0).x();
-                    let y = motion.pointer_at_index(0).y();
-
-                    if x > button_x
-                        && x < button_x + button_width
-                        && y > button_y
-                        && y < button_y + button_height
-                    {
-                        go_settings = true;
+    // Загрузка шрифта (безопасная, без unwrap паники)
+    static mut FONT: Option<Font> = None;
+    unsafe {
+        if FONT.is_none() {
+            if let Ok(filename) = CString::new("Font.ttf") {
+                if let Some(mut asset) = app.asset_manager().open(&filename) {
+                    if let Some(buffer) = asset.buffer() {
+                        FONT = Font::from_bytes(buffer.to_vec(), fontdue::FontSettings::default()).ok();
                     }
                 }
             }
+        }
+    }
 
+    let mut go_settings = false;
+    let (bw, bh) = (width as f32 * 0.4, height as f32 * 0.15);
+    let (bx, by) = ((width as f32 - bw)/2.0, (height as f32 - bh)/2.0);
+
+    if let Ok(mut iter) = app.input_events_iter() {
+        while iter.next(|ev| {
+            if let InputEvent::MotionEvent(m) = ev {
+                if m.action() == MotionAction::Down {
+                    let x = m.pointer_at_index(0).x();
+                    let y = m.pointer_at_index(0).y();
+                    if x > bx && x < bx + bw && y > by && y < by + bh { go_settings = true; }
+                }
+            }
             InputStatus::Handled
         }) {}
     }
-
     go_settings
 }
