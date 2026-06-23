@@ -1,4 +1,4 @@
-use android_activity::{AndroidApp, MainEvent, PollEvent};
+use android_activity::{AndroidApp, InputEvent, MainEvent, PollEvent};
 use glam::*;
 use glow::*;
 use log::info;
@@ -29,7 +29,6 @@ const EGL_WIDTH: i32 = 0x3057;
 const EGL_HEIGHT: i32 = 0x3056;
 
 // ========== GAME STATE ==========
-// Добавляем Clone, Copy, чтобы Rust мог легко копировать структуры как в Lua
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GameState {
     Lobby,
@@ -106,13 +105,14 @@ unsafe fn draw_rect(rs: &RenderState, x: f32, y: f32, w: f32, h: f32, color: Vec
     gl.buffer_data_u8_slice(ARRAY_BUFFER, std::slice::from_raw_parts(
         vertices.as_ptr() as *const u8,
         std::mem::size_of_val(&vertices)
-    ), DYNAMIC_DRAW); // DYNAMIC_DRAW так как мы обновляем вершины каждый кадр
+    ), DYNAMIC_DRAW);
 
     gl.uniform_4_f32(Some(&rs.u_color), color.x, color.y, color.z, color.w);
     gl.uniform_2_f32(Some(&rs.u_res), sw, sh);
 
     gl.enable_vertex_attrib_array(0);
-    gl.vertex_attrib_pointer_f32(0, 2, false, 0, 0);
+    // ИСПРАВЛЕНО: добавлен аргумент FLOAT (0x1406) для 3-го параметра
+    gl.vertex_attrib_pointer_f32(0, 2, FLOAT, false, 0, 0);
     gl.draw_arrays(TRIANGLES, 0, 6);
     gl.disable_vertex_attrib_array(0);
 }
@@ -141,7 +141,6 @@ unsafe fn draw_lobby(rs: &RenderState) {
     let sub_w = "TOUCH & DODGE".len() as f32 * sub_size * 1.2;
     draw_cubic_text(rs, "TOUCH & DODGE", w/2.0 - sub_w/2.0, h/2.0 - 60.0, sub_size, vec4(1.0, 1.0, 1.0, 1.0), w, h);
 
-    // Теперь можно безопасно копировать структуру кнопки
     let btn = LOBBY_BTN;
     draw_rect(rs, btn.x+5.0, btn.y+6.0, btn.w, btn.h, vec4(0.0, 0.0, 0.0, 0.2), w, h);
     draw_rect(rs, btn.x, btn.y, btn.w, btn.h, vec4(0.55, 0.20, 0.85, 1.0), w, h);
@@ -164,35 +163,18 @@ pub fn android_main(app: AndroidApp) {
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Trace));
     info!("Cubic Battle запущен на Rust!");
 
-    // Настройка обработки нажатий для android-activity 0.5 (без возврата InputStatus)
-    app.set_input_callback(|_app, input_event| {
-        if let Some(motion) = input_event.as_motion_event() {
-            if motion.get_action() == 0 { // ACTION_DOWN
-                let x = motion.get_x(0) as f32;
-                let y = motion.get_y(0) as f32;
-                unsafe {
-                    if CURRENT_STATE == GameState::Lobby {
-                        let btn = LOBBY_BTN;
-                        if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
-                            info!("Кнопка PLAY нажата!");
-                            CURRENT_STATE = GameState::Game;
-                        }
-                    }
-                }
-            }
-        }
-    });
-
     let mut gl_ctx: Option<GlContext> = None;
     let mut render_state: Option<RenderState> = None;
 
     loop {
+        // ИСПРАВЛЕНО: Ввод обрабатывается внутри poll_events в android-activity 0.5
         app.poll_events(None, |event| {
             match event {
                 PollEvent::Main(MainEvent::InitWindow { .. }) => {
                     let window = app.native_window().expect("No window");
                     unsafe {
-                        if let Some(ctx) = init_egl(window.ptr()) {
+                        // ИСПРАВЛЕНО: правильное преобразование указателя окна
+                        if let Some(ctx) = init_egl(window.ptr().as_ptr() as *mut c_void) {
                             let gl = ctx.gl;
                             
                             place_lobby();
@@ -224,6 +206,24 @@ pub fn android_main(app: AndroidApp) {
                     gl_ctx = None;
                     render_state = None;
                 }
+                // ИСПРАВЛЕНО: Обработка нажатий через PollEvent::Input
+                PollEvent::Input(input_event) => {
+                    if let Some(motion) = input_event.as_motion_event() {
+                        if motion.get_action() == 0 { // ACTION_DOWN
+                            let x = motion.get_x(0) as f32;
+                            let y = motion.get_y(0) as f32;
+                            unsafe {
+                                if CURRENT_STATE == GameState::Lobby {
+                                    let btn = LOBBY_BTN;
+                                    if x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h {
+                                        info!("Кнопка PLAY нажата!");
+                                        CURRENT_STATE = GameState::Game;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         });
@@ -246,4 +246,4 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
-                                   }
+}
