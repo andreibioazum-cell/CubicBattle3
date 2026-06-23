@@ -1,10 +1,48 @@
+[package]
+name = "cubicbattle"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# Это критически важно для Android .so библиотеки
+crate-type = ["cdylib"]
+
+[dependencies]
+# Работа с жизненным циклом Android
+android-activity = { version = "0.6", features = ["native-activity"] }
+# Логирование (просмотр через logcat)
+log = "0.4"
+android_logger = "0.14"
+# Работа с нативными окнами и буфером пикселей
+ndk = "0.9"
+
+# ================= МЕТАДАННЫЕ ДЛЯ CARGO-APK =================
+# Эти настройки используются при сборке APK файла
+
 [package.metadata.android]
+# Уникальное имя приложения на телефоне
 package = "com.cubicbattle.game"
+# Название иконки в меню
 label = "Cubic Battle"
+# Папка с ассетами (шрифты, картинки)
 assets = "assets"
-# Разрешаем полноэкранный режим
-opencv = false
+# Версия SDK (24 — это Android 7.0 и выше)
+min_sdk_version = 24
+target_sdk_version = 34
+# Только горизонтальная ориентация
+icon = "@mipmap/ic_launcher"
 
 [[package.metadata.android.uses_feature]]
-name = "android.hardware.vulkan.version"
+name = "android.software.vulkan.version"
 required = false
+
+# ================= ОПТИМИЗАЦИИ ДЛЯ RELEASE =================
+# Программный рендеринг требует много ресурсов процессора, 
+# поэтому в релизе выжимаем максимум скорости.
+
+[profile.release]
+opt-level = 3        # Максимальная скорость кода
+lto = true           # Оптимизация при линковке
+codegen-units = 1    # Больше времени на сборку, но быстрее код
+panic = "abort"      # Уменьшает размер бинарника
+strip = true         # Удаляет отладочную информацию (минимум размера)
